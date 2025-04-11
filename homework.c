@@ -81,7 +81,7 @@ int translate(int pathc, char **pathv) {
         }
 
         bool found = false;
-        struct fs_dirent dirent[128]; // 4096 bytes / 32 bytes
+        struct fs_dirent dirent[128];
         block_read(dirent, inode.ptrs[0], 1);
 
         for (int j = 0; j < 128; j++) {
@@ -155,7 +155,7 @@ void* fs_init(struct fuse_conn_info *conn)
  */
 int fs_getattr(const char *path, struct stat *sb)
 {
-    /* your code here */
+    
     return -EOPNOTSUPP;
 }
 
