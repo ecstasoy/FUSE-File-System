@@ -66,6 +66,40 @@ int parse(char *path, char **argv) {
     return i;
 }
 
+int translate(int pathc, char **pathv) {
+    int inum = 2; // root inode
+    struct fs_inode inode;
+
+    for (int i = 0; i < pathc; i++) {
+        if (block_read(&inode, inum, 1) < 0) {
+            fprintf(stderr, "Error reading inode %d\n", inum);
+            return -EIO;
+        }
+        if (!S_ISDIR(inode.mode)) {
+            fprintf(stderr, "Not a directory: %s\n", pathv[i]);
+            return -ENOTDIR;
+        }
+
+        bool found = false;
+        struct fs_dirent dirent[128]; // 4096 bytes / 32 bytes
+        block_read(dirent, inode.ptrs[0], 1);
+
+        for (int j = 0; j < 128; j++) {
+            if (entries[j].valid && strcmp(pathv[i], dirent[j].name) == 0) {
+                inum = dirent[j].inode;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            fprintf(stderr, "File not found: %s\n", pathv[i]);
+            return -ENOENT;
+        }
+    }
+
+    return inum;
+}
 
 /* init - this is called once by the FUSE framework at startup. Ignore
  * the 'conn' argument.
