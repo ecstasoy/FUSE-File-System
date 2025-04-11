@@ -7,6 +7,8 @@
 
 #define FUSE_USE_VERSION 27
 #define _FILE_OFFSET_BITS 64
+#define MAX_BLOCKS 32768 //4096 bytes × 8 bits
+#define BLOCK_SIZE 4096
 
 #include <stdlib.h>
 #include <stddef.h>
@@ -26,6 +28,8 @@
 #define open(a,b) error do not use open()
 #define read(a,b,c) error do not use read()
 #define write(a,b,c) error do not use write()
+
+unsigned char bitmap[BLOCK_SIZE]; // block 1, global for use in allocation later
 
 /* disk access. All access is in terms of 4KB blocks; read and
  * write functions return 0 (success) or -EIO.
@@ -48,6 +52,20 @@ int bit_test(unsigned char *map, int i)
     return map[i/8] & (1 << (i%8));
 }
 
+#define MAX_PATH_LEN 10
+#define MAX_NAME_LEN 27
+int parse(char *path, char **argv) {
+    int i;
+    for (i = 0; i < MAX_PATH_LEN; i++) {
+        if ((argv[i] = strtok(path, "/")) == NULL)
+            break;
+        if (strlen(argv[i]) > MAX_NAME_LEN)
+            argv[i][MAX_NAME_LEN] = 0;
+        path = NULL;
+    }
+    return i;
+}
+
 
 /* init - this is called once by the FUSE framework at startup. Ignore
  * the 'conn' argument.
@@ -57,7 +75,10 @@ int bit_test(unsigned char *map, int i)
  */
 void* fs_init(struct fuse_conn_info *conn)
 {
-    /* your code here */
+    if (block_read(bitmap, 1, 1) < 0) {
+        fprintf(stderr, "Error reading block bitmap\n");
+        return NULL;
+    }
     return NULL;
 }
 
