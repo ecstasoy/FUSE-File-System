@@ -200,6 +200,40 @@ START_TEST(test_read_full) {
 }
 END_TEST
 
+START_TEST(test_read_chunks) {
+    size_t chunks[] = {17, 100, 1000, 1024, 1970, 3000};
+    for (int i = 0; read_test[i].path != NULL; i++) {
+        size_t file_size = read_test[i].size;
+
+        for (int j = 0; j < sizeof(chunks) / sizeof(chunks[0]); j++) {
+            char *buffer = malloc(file_size + 1);
+            if (buffer == NULL) {
+                ck_abort_msg("Failed to allocate buffer");
+            }
+            memset(buffer, 0, file_size + 1);
+
+            size_t offset = 0;
+            while (offset < file_size) {
+                size_t chunk_size = chunks[j];
+                if (offset + chunk_size > file_size) {
+                    chunk_size = file_size - offset;
+                }
+
+                int bytes_read = fs_ops.read(read_test[i].path, buffer + offset, chunk_size, offset, NULL);
+                printf("test_read_chunks read offset: %zu, length: %zu, bytes_read: %d\n",
+                       offset, chunk_size, bytes_read);
+                ck_assert_msg(bytes_read == chunk_size, "Expected %zu bytes, got %d from %s",
+                              chunk_size, bytes_read, read_test[i].path);
+
+                offset += bytes_read;
+            }
+
+            free(buffer);
+        }
+    }
+}
+END_TEST
+
 /* this is an example of a callback function for readdir
  */
 int empty_filler(void *ptr, const char *name, const struct stat *stbuf,
@@ -237,6 +271,7 @@ int main(int argc, char **argv)
     tcase_add_test(tc, test_readdir_all);
     tcase_add_test(tc, test_readdir_errors);
     tcase_add_test(tc, test_read_full);
+    tcase_add_test(tc, test_read_chunks);
 
     suite_add_tcase(s, tc);
     SRunner *sr = srunner_create(s);
