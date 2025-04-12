@@ -247,6 +247,33 @@ START_TEST(test_statfs) {
 }
 END_TEST
 
+START_TEST(test_chmod) {
+    struct stat sb;
+
+    // --- Test chmod on a file ---
+    const char *file_path = "/file.1k";
+    int rv = fs_ops.chmod(file_path, 0644);
+    printf("test_chmod file_path: %s, rv: %d\n", file_path, rv);
+    ck_assert_int_eq(rv, 0);
+
+    rv = fs_ops.getattr(file_path, &sb);
+    ck_assert_int_eq(rv, 0);
+    ck_assert(S_ISREG(sb.st_mode));
+    ck_assert_int_eq(sb.st_mode & 0777, 0644); // octal mask
+
+    // --- Test chmod on a directory ---
+    const char *dir_path = "/dir3";
+    rv = fs_ops.chmod(dir_path, 0700);
+    printf("test_chmod dir_path: %s, rv: %d\n", dir_path, rv);
+    ck_assert_int_eq(rv, 0);
+
+    rv = fs_ops.getattr(dir_path, &sb);
+    ck_assert_int_eq(rv, 0);
+    ck_assert(S_ISDIR(sb.st_mode));
+    ck_assert_int_eq(sb.st_mode & 0777, 0700);
+}
+END_TEST
+
 /* this is an example of a callback function for readdir
  */
 int empty_filler(void *ptr, const char *name, const struct stat *stbuf,
@@ -286,6 +313,7 @@ int main(int argc, char **argv)
     tcase_add_test(tc, test_read_full);
     tcase_add_test(tc, test_read_chunks);
     tcase_add_test(tc, test_statfs);
+    tcase_add_test(tc, test_chmod);
 
     suite_add_tcase(s, tc);
     SRunner *sr = srunner_create(s);
