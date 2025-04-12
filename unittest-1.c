@@ -274,6 +274,47 @@ START_TEST(test_chmod) {
 }
 END_TEST
 
+START_TEST(test_rename_file) {
+    const char *old_path = "/file.1k";
+    const char *new_path = "/file.2k";
+
+    int rv = fs_ops.rename(old_path, new_path);
+    printf("test_rename_file rv: %d\n", rv);
+    ck_assert_int_eq(rv, 0);
+
+    char *buffer = malloc(1000);
+    rv = fs_ops.read(new_path, buffer, 1000, 0, NULL);
+    printf("test_rename_file read rv: %d\n", rv);
+    ck_assert_int_eq(rv, 1000);
+
+    unsigned cksum = crc32(0L, buffer, rv);
+    ck_assert_int_eq(cksum, 1726121896);
+
+    free(buffer);
+}
+END_TEST
+
+START_TEST(test_rename_directory) {
+    const char *old_path = "/dir3";
+    const char *new_path = "/dir3-renamed";
+
+    int rv = fs_ops.rename(old_path, new_path);
+    printf("test_rename_directory rv: %d\n", rv);
+    ck_assert_int_eq(rv, 0);
+
+    const char *file_path = "/dir3-renamed/subdir/file.4k-";
+    char *buffer = malloc(4095);
+    rv = fs_ops.read(file_path, buffer, 4095, 0, NULL);
+    printf("test_rename_directory read rv: %d\n", rv);
+    ck_assert_int_eq(rv, 4095);
+
+    unsigned cksum = crc32(0L, buffer, rv);
+    ck_assert_int_eq(cksum, 2991486384);
+
+    free(buffer);
+}
+END_TEST
+
 /* this is an example of a callback function for readdir
  */
 int empty_filler(void *ptr, const char *name, const struct stat *stbuf,
@@ -295,6 +336,7 @@ int empty_filler(void *ptr, const char *name, const struct stat *stbuf,
 
 int main(int argc, char **argv)
 {
+    system("python gen-disk.py -q disk1.in test.img");
     block_init("test.img");
     fs_ops.init(NULL);
     
@@ -314,6 +356,8 @@ int main(int argc, char **argv)
     tcase_add_test(tc, test_read_chunks);
     tcase_add_test(tc, test_statfs);
     tcase_add_test(tc, test_chmod);
+    tcase_add_test(tc, test_rename_file);
+    tcase_add_test(tc, test_rename_directory);
 
     suite_add_tcase(s, tc);
     SRunner *sr = srunner_create(s);
