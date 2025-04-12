@@ -47,10 +47,9 @@ struct {
 };
 
 /* change test name and make it do something useful */
-START_TEST(test_getattr_paths)
-{
+START_TEST(test_getattr_paths) {
     for (int i = 0; getattr_test[i].path != NULL; i++) {
-        printf("Testing: %s\n", getattr_test[i].path);
+        printf("getattr_test[%d]: %s\n", i, getattr_test[i].path);
         struct stat sb;
         int rv = fs_ops.getattr(getattr_test[i].path, &sb);
         ck_assert_int_eq(rv, 0);
@@ -65,38 +64,141 @@ START_TEST(test_getattr_paths)
 }
 END_TEST
 
-START_TEST(test_getattr_not_a_file)
-{
+START_TEST(test_getattr_not_a_file) {
     struct stat sb;
     int rv = fs_ops.getattr("/not-a-file", &sb);
+    printf("test_getattr_not_a_file rv: %d\n", rv);
     ck_assert_int_eq(rv, -ENOENT);
 }
 END_TEST
 
-START_TEST(test_getattr_not_a_dir)
-{
+START_TEST(test_getattr_not_a_dir) {
     struct stat sb;
     int rv = fs_ops.getattr("/file.1k/file.0", &sb);
+    printf("test_getattr_not_a_dir rv: %d\n", rv);
     ck_assert_int_eq(rv, -ENOTDIR);
 }
 END_TEST
 
-START_TEST(test_getattr_middle_missing)
-{
+START_TEST(test_getattr_middle_missing) {
     struct stat sb;
     int rv = fs_ops.getattr("/not-a-dir/file.0", &sb);
+    printf("test_getattr_middle_missing rv: %d\n", rv);
     ck_assert_int_eq(rv, -ENOENT);
 }
 END_TEST
 
-START_TEST(test_getattr_subdir_missing)
-{
+START_TEST(test_getattr_subdir_missing) {
     struct stat sb;
     int rv = fs_ops.getattr("/dir2/not-a-file", &sb);
+    printf("test_getattr_subdir_missing rv: %d\n", rv);
     ck_assert_int_eq(rv, -ENOENT);
 }
 END_TEST
 
+struct {
+    const char* name;
+    int seen;
+} dirent[16];
+
+struct {
+    const char *path;
+    const char *entries[16];
+} readdir_test[] = {
+        {"/", {"dir2", "dir3", "dir-with-long-name", "file.10", "file.1k", "file.8k+", NULL}},
+        {"/dir2", {"twenty-seven-byte-file-name", "file.4k+", NULL}},
+        {"/dir3", {"subdir", "file.12k-", NULL}},
+        {"/dir3/subdir", {"file.4k-", "file.8k-", "file.12k", NULL}},
+        {"/dir-with-long-name", {"file.12k+", NULL}},
+        {NULL}
+};
+
+void readdir_test_load(const char **names) {
+    int i = 0;
+    while (names[i] != NULL) {
+        dirent[i].name = names[i];
+        dirent[i].seen = 0;
+        i++;
+    }
+    dirent[i].name = NULL;
+}
+
+int readdir_test_filler(void *ptr, const char *name, const struct stat *st, off_t off) {
+    for (int i = 0; dirent[i].name != NULL; i++) {
+        if (strcmp(name, dirent[i].name) == 0) {
+            ck_assert_int_eq(dirent[i].seen, 0);
+            dirent[i].seen = 1;
+            return 0;
+        }
+    }
+    ck_abort_msg("Unexpected name in readdir: %s", name);
+    return 0;
+}
+
+START_TEST(test_readdir_all) {
+    for (int i = 0; readdir_test[i].path != NULL; i++) {
+        readdir_test_load(readdir_test[i].entries);
+        int rv = fs_ops.readdir(readdir_test[i].path, NULL, readdir_test_filler, 0, NULL);
+        printf("test_readdir_all rv: %d\n", rv);
+        ck_assert_int_eq(rv, 0);
+        for (int j = 0; dirent[j].name != NULL; j++) {
+            printf("test_readdir_all readdir: %s, seen: %d\n", dirent[j].name, dirent[j].seen);
+            ck_assert_int_eq(dirent[j].seen, 1);
+        }
+    }
+}
+END_TEST
+
+START_TEST(test_readdir_errors){
+    int rv1 = fs_ops.readdir("/file.1k", NULL, readdir_test_filler, 0, NULL);
+    printf("test_readdir_errors rv: %d\n", rv1);
+    ck_assert_msg(rv1 == -ENOTDIR, "Expected -ENOTDIR, got %d", rv1);
+
+    int rv2 = fs_ops.readdir("/no/such/path", NULL, readdir_test_filler, 0, NULL);
+    printf("test_readdir_errors rv: %d\n", rv2);
+    ck_assert_msg(rv2 == -ENOENT, "Expected -ENOENT, got %d", rv2);
+}
+END_TEST
+
+struct {
+    const char *path;
+    size_t size;
+    unsigned cksum;
+} read_test[] = {
+        {"/file.1k", 1000, 1726121896},
+        {"/file.10", 10, 3766980606},
+        {"/dir-with-long-name/file.12k+", 12289, 2781093465},
+        {"/dir2/twenty-seven-byte-file-name", 1000, 2902524398},
+        {"/dir2/file.4k+", 4098, 1626046637},
+        {"/dir3/subdir/file.4k-", 4095, 2991486384},
+        {"/dir3/subdir/file.8k-", 8190, 724101859},
+        {"/dir3/subdir/file.12k", 12288, 1483119748},
+        {"/dir3/file.12k-", 12287, 1203178000},
+        {"/file.8k+", 8195, 1217760297},
+        {NULL}
+};
+
+START_TEST(test_read_full) {
+    char *buffer = malloc(15000);
+    if (buffer == NULL) {
+        ck_abort_msg("Failed to allocate buffer");
+    }
+    for (int i = 0; read_test[i].path != NULL; i++) {
+        memset(buffer, 0, 15000);
+
+        int bytes_read = fs_ops.read(read_test[i].path, buffer, read_test[i].size, 0, NULL);
+        printf("test_read_full bytes_read: %d\n", bytes_read);
+        ck_assert_msg(bytes_read == read_test[i].size, "Expected %zu bytes, got %d from %s",
+                      read_test[i].size, bytes_read, read_test[i].path);
+
+        unsigned cksum = crc32(0L, buffer, bytes_read);
+        ck_assert_msg(cksum == read_test[i].cksum, "Expected cksum %u, got %u from %s",
+                      read_test[i].cksum, cksum, read_test[i].path);
+    }
+
+    free(buffer);
+}
+END_TEST
 
 /* this is an example of a callback function for readdir
  */
@@ -132,6 +234,9 @@ int main(int argc, char **argv)
     tcase_add_test(tc, test_getattr_not_a_dir);
     tcase_add_test(tc, test_getattr_middle_missing);
     tcase_add_test(tc, test_getattr_subdir_missing);
+    tcase_add_test(tc, test_readdir_all);
+    tcase_add_test(tc, test_readdir_errors);
+    tcase_add_test(tc, test_read_full);
 
     suite_add_tcase(s, tc);
     SRunner *sr = srunner_create(s);
