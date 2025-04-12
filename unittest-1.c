@@ -234,6 +234,19 @@ START_TEST(test_read_chunks) {
 }
 END_TEST
 
+START_TEST(test_statfs) {
+    struct statvfs sv;
+    int rv = fs_ops.statfs("/", &sv);
+    printf("test_statfs rv: %d\n", rv);
+    ck_assert_int_eq(rv, 0);
+    ck_assert_int_eq(sv.f_bsize, 4096);
+    ck_assert_int_eq(sv.f_blocks, 398); // total blocks - 2
+    ck_assert_int_eq(sv.f_bfree, 355);
+    ck_assert_int_eq(sv.f_bavail, 355);
+    ck_assert_int_eq(sv.f_namemax, 27);
+}
+END_TEST
+
 /* this is an example of a callback function for readdir
  */
 int empty_filler(void *ptr, const char *name, const struct stat *stbuf,
@@ -272,6 +285,7 @@ int main(int argc, char **argv)
     tcase_add_test(tc, test_readdir_errors);
     tcase_add_test(tc, test_read_full);
     tcase_add_test(tc, test_read_chunks);
+    tcase_add_test(tc, test_statfs);
 
     suite_add_tcase(s, tc);
     SRunner *sr = srunner_create(s);
