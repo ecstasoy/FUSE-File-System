@@ -454,8 +454,30 @@ int fs_statfs(const char *path, struct statvfs *st) {
      * it's OK to calculate this dynamically on the rare occasions
      * when this function is called.
      */
-    /* your code here */
-    return -EOPNOTSUPP;
+
+    memset(st, 0, sizeof(struct statvfs));
+    struct fs_super sb;
+    if (block_read(&sb, 0, 1) < 0) {
+        fprintf(stderr, "Error reading superblock\n");
+        return -EIO;
+    }
+    int disk_size = sb.disk_size;
+    st->f_bsize = BLOCK_SIZE;
+    st->f_blocks = disk_size - 2;
+
+    int used = 0;
+    for (int i = 0; i < MAX_BLOCKS; i++) {
+        if (bit_test(bitmap, i)) {
+            used++;
+        }
+    }
+    printf("Used blocks: %d\n", used);
+
+    st->f_bfree = st->f_blocks - (used - 2);
+    st->f_bavail = st->f_bfree;
+    st->f_namemax = MAX_NAME_LEN;
+
+    return 0;
 }
 
 /* operations vector. Please don't rename it, or else you'll break things
