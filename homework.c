@@ -56,6 +56,11 @@ int bit_test(unsigned char *map, int i) {
 #define MAX_PATH_LEN 10
 #define MAX_NAME_LEN 27
 
+/*
+ * parse - split a path into components. The path is split on '/'.
+ * The components are stored in the argv array, and the number of
+ * components is returned.
+ */
 int parse(char *path, char **argv) {
     int i;
     for (i = 0; i < MAX_PATH_LEN; i++) {
@@ -68,6 +73,11 @@ int parse(char *path, char **argv) {
     return i;
 }
 
+/*
+ * translate - translate a path into an inode number. The path is
+ * assumed to be absolute, and the first component is the root
+ * directory.
+ */
 int translate(int pathc, char **pathv) {
     int inum = 2; // root inode
     struct fs_inode inode;
@@ -76,17 +86,17 @@ int translate(int pathc, char **pathv) {
         if (block_read(&inode, inum, 1) < 0) {
             fprintf(stderr, "Error reading inode %d\n", inum);
             return -EIO;
-        }
+        } // read the inode
         if (!S_ISDIR(inode.mode)) {
             fprintf(stderr, "Not a directory: %s\n", pathv[i]);
             return -ENOTDIR;
-        }
+        } //
 
         struct fs_dirent dirent[128];
         if (block_read(dirent, inode.ptrs[0], 1) < 0) {
             fprintf(stderr, "Failed to read directory block %u for inode %d\n", inode.ptrs[0], inum);
             return -EIO;
-        }
+        } // read the directory entries
 
         bool found = false;
         for (int j = 0; j < 128; j++) {
@@ -94,8 +104,8 @@ int translate(int pathc, char **pathv) {
                 inum = dirent[j].inode;
                 found = true;
                 break;
-            }
-        }
+            } // check if the name matches between the directory entry and the path
+        } // loop through the directory entries
 
         if (!found) {
             fprintf(stderr, "File not found: %s\n", pathv[i]);
@@ -315,8 +325,93 @@ int fs_rmdir(const char *path) {
  * destination file, and replace an empty directory with a full one.
  */
 int fs_rename(const char *src_path, const char *dst_path) {
-    /* your code here */
-    return -EOPNOTSUPP;
+    char *src = strdup(src_path);
+    char *dst = strdup(dst_path);
+
+    char *srcv[MAX_PATH_LEN], *dstv[MAX_PATH_LEN];
+    int src_pathc = parse(src, srcv);
+    int dst_pathc = parse(dst, dstv);
+
+    if (src_pathc <= 1 || dst_pathc <= 1) {
+        free(src);
+        free(dst);
+        fprintf(stderr, "Invalid path: %s or %s\n", src_path, dst_path);
+        return -EINVAL;
+    } // rename requires both a parent and a leaf
+
+    for (int i = 0; i < src_pathc - 1; i++) {
+        if (strcmp(srcv[i], dstv[i]) != 0) {
+            free(src);
+            free(dst);
+            fprintf(stderr, "Source and destination paths do not match\n");
+            return -EINVAL;
+        } // enforce renaming within the same directory
+    }
+
+    int parent_inum = translate(src_pathc - 1, srcv);
+    if (parent_inum < 0) {
+        free(src);
+        free(dst);
+        fprintf(stderr, "Error translating source path: %s\n", src_path);
+        return parent_inum;
+    }
+
+    struct fs_inode parent_inode;
+    if (block_read(&parent_inode, parent_inum, 1) < 0) {
+        free(src);
+        free(dst);
+        fprintf(stderr, "Error reading parent inode %d\n", parent_inum);
+        return -EIO;
+    }
+
+    struct fs_dirent dirent[128];
+    if (block_read(&dirent, parent_inode.ptrs[0], 1) < 0) {
+        free(src);
+        free(dst);
+        fprintf(stderr, "Error reading directory entries\n");
+        return -EIO;
+    }
+
+    bool found_src = false;
+    bool found_dst = false;
+    int src_idx = -1;
+
+    for (int i = 0; i < 128; i++) {
+        if (dirent[i].valid && strcmp(srcv[src_pathc - 1], dirent[i].name) == 0) {
+            found_src = true;
+            src_idx = i;
+        }
+        if (dirent[i].valid && strcmp(dstv[dst_pathc - 1], dirent[i].name) == 0) {
+            found_dst = true;
+        }
+    }
+
+    if (!found_src) {
+        free(src);
+        free(dst);
+        fprintf(stderr, "Source file not found: %s\n", srcv[src_pathc - 1]);
+        return -ENOENT;
+    }
+    if (found_dst) {
+        free(src);
+        free(dst);
+        fprintf(stderr, "Destination file already exists: %s\n", dstv[dst_pathc - 1]);
+        return -EEXIST;
+    }
+
+    strncpy(dirent[src_idx].name, dstv[dst_pathc - 1], MAX_NAME_LEN);
+    dirent[src_idx].name[MAX_NAME_LEN] = '\0';
+
+    if (block_write(&dirent, parent_inode.ptrs[0], 1) < 0) {
+        free(src);
+        free(dst);
+        fprintf(stderr, "Error writing directory entries\n");
+        return -EIO;
+    }
+
+    free(src);
+    free(dst);
+    return 0;
 }
 
 /* chmod - change file permissions
@@ -343,7 +438,7 @@ int fs_chmod(const char *c_path, mode_t mode) {
         return -EIO;
     }
 
-    inode.mode = (inode.mode & S_IFMT | (mode & ~S_IFMT);
+    inode.mode = (inode.mode & S_IFMT) | (mode & ~S_IFMT);
 
     if (block_write(&inode, inum, 1) < 0) {
         fprintf(stderr, "Error writing inode %d\n", inum);
