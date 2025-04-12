@@ -101,6 +101,27 @@ int translate(int pathc, char **pathv) {
     return inum;
 }
 
+int inode_to_stat(int inum, struct stat *sb) {
+    struct fs_inode inode;
+    if (block_read(&inode, inum, 1) < 0) {
+        fprintf(stderr, "Error reading inode %d\n", inum);
+        return -EIO;
+    }
+
+    memset(sb, 0, sizeof(struct stat));
+    sb->st_mode = inode->mode;
+    sb->st_nlink = 1;
+    sb->st_uid = inode->uid;
+    sb->st_gid = inode->gid;
+    sb->st_size = inode->size;
+    sb->st_atime = inode->atime;
+    sb->st_mtime = inode->mtime;
+    sb->st_ctime = inode->ctime;
+    sb->st_blocks = (inode->size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+    return 0;
+}
+
 /* init - this is called once by the FUSE framework at startup. Ignore
  * the 'conn' argument.
  * recommended actions:
@@ -138,8 +159,6 @@ void* fs_init(struct fuse_conn_info *conn)
  *    free(_path);
  */
 
-
-
 /* getattr - get file or directory attributes. For a description of
  *  the fields in 'struct stat', see 'man lstat'.
  *
@@ -155,7 +174,7 @@ void* fs_init(struct fuse_conn_info *conn)
  */
 int fs_getattr(const char *path, struct stat *sb)
 {
-    
+
     return -EOPNOTSUPP;
 }
 
