@@ -25,10 +25,10 @@
 /* if you don't understand why you can't use these system calls here, 
  * you need to read the assignment description another time
  */
-#define stat(a,b) error do not use stat()
-#define open(a,b) error do not use open()
-#define read(a,b,c) error do not use read()
-#define write(a,b,c) error do not use write()
+#define stat(a, b) error do not use stat()
+#define open(a, b) error do not use open()
+#define read(a, b, c) error do not use read()
+#define write(a, b, c) error do not use write()
 
 unsigned char bitmap[BLOCK_SIZE]; // block 1, global for use in allocation later
 
@@ -36,25 +36,26 @@ unsigned char bitmap[BLOCK_SIZE]; // block 1, global for use in allocation later
  * write functions return 0 (success) or -EIO.
  */
 extern int block_read(void *buf, int lba, int nblks);
+
 extern int block_write(void *buf, int lba, int nblks);
 
 /* bitmap functions
  */
-void bit_set(unsigned char *map, int i)
-{
-    map[i/8] |= (1 << (i%8));
+void bit_set(unsigned char *map, int i) {
+    map[i / 8] |= (1 << (i % 8));
 }
-void bit_clear(unsigned char *map, int i)
-{
-    map[i/8] &= ~(1 << (i%8));
+
+void bit_clear(unsigned char *map, int i) {
+    map[i / 8] &= ~(1 << (i % 8));
 }
-int bit_test(unsigned char *map, int i)
-{
-    return map[i/8] & (1 << (i%8));
+
+int bit_test(unsigned char *map, int i) {
+    return map[i / 8] & (1 << (i % 8));
 }
 
 #define MAX_PATH_LEN 10
 #define MAX_NAME_LEN 27
+
 int parse(char *path, char **argv) {
     int i;
     for (i = 0; i < MAX_PATH_LEN; i++) {
@@ -81,10 +82,13 @@ int translate(int pathc, char **pathv) {
             return -ENOTDIR;
         }
 
-        bool found = false;
         struct fs_dirent dirent[128];
-        block_read(dirent, inode.ptrs[0], 1);
+        if (block_read(dirent, inode.ptrs[0], 1) < 0) {
+            fprintf(stderr, "Failed to read directory block %u for inode %d\n", inode.ptrs[0], inum);
+            return -EIO;
+        }
 
+        bool found = false;
         for (int j = 0; j < 128; j++) {
             if (dirent[j].valid && strcmp(pathv[i], dirent[j].name) == 0) {
                 inum = dirent[j].inode;
@@ -130,8 +134,7 @@ int inode_to_stat(int inum, struct stat *sb) {
  *   - read superblock
  *   - allocate memory, read bitmaps and inodes
  */
-void* fs_init(struct fuse_conn_info *conn)
-{
+void *fs_init(struct fuse_conn_info *conn) {
     if (block_read(bitmap, 1, 1) < 0) {
         fprintf(stderr, "Error reading block bitmap\n");
         return NULL;
@@ -174,13 +177,12 @@ void* fs_init(struct fuse_conn_info *conn)
  * hint - factor out inode-to-struct stat conversion - you'll use it
  *        again in readdir
  */
-int fs_getattr(const char *c_path, struct stat *sb)
-{
+int fs_getattr(const char *c_path, struct stat *sb) {
     char *path = strdup(c_path);
     char *pathv[MAX_PATH_LEN];
     int pathc = parse(path, pathv);
     int inum = translate(pathc, pathv);
-    free (path);
+    free(path);
 
     if (inum < 0) {
         fprintf(stderr, "Error translating path: %s\n", c_path);
@@ -203,9 +205,8 @@ int fs_getattr(const char *c_path, struct stat *sb)
  *        to call the filler function
  */
 int fs_readdir(const char *c_path, void *ptr, fuse_fill_dir_t filler,
-		       off_t offset, struct fuse_file_info *fi)
-{
-    char *path = strdup(path);
+               off_t offset, struct fuse_file_info *fi) {
+    char *path = strdup(c_path);
     char *pathv[MAX_PATH_LEN];
     int pathc = parse(path, pathv);
     int inum = translate(pathc, pathv);
@@ -263,9 +264,7 @@ int fs_readdir(const char *c_path, void *ptr, fuse_fill_dir_t filler,
  * If there are already 128 entries in the directory (i.e. it's filled an
  * entire block), you are free to return -ENOSPC instead of expanding it.
  */
-int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
-{
-    /* your code here */
+int fs_create(const char *c_path, mode_t mode, struct fuse_file_info *fi) {
     return -EOPNOTSUPP;
 }
 
@@ -277,9 +276,8 @@ int fs_create(const char *path, mode_t mode, struct fuse_file_info *fi)
  * success - return 0
  * Errors - path resolution, EEXIST
  * Conditions for EEXIST are the same as for create. 
- */ 
-int fs_mkdir(const char *path, mode_t mode)
-{
+ */
+int fs_mkdir(const char *path, mode_t mode) {
     /* your code here */
     return -EOPNOTSUPP;
 }
@@ -289,8 +287,7 @@ int fs_mkdir(const char *path, mode_t mode)
  *  success - return 0
  *  errors - path resolution, ENOENT, EISDIR
  */
-int fs_unlink(const char *path)
-{
+int fs_unlink(const char *path) {
     /* your code here */
     return -EOPNOTSUPP;
 }
@@ -299,8 +296,7 @@ int fs_unlink(const char *path)
  *  success - return 0
  *  Errors - path resolution, ENOENT, ENOTDIR, ENOTEMPTY
  */
-int fs_rmdir(const char *path)
-{
+int fs_rmdir(const char *path) {
     /* your code here */
     return -EOPNOTSUPP;
 }
@@ -318,8 +314,7 @@ int fs_rmdir(const char *path)
  * particular, the full version can move across directories, replace a
  * destination file, and replace an empty directory with a full one.
  */
-int fs_rename(const char *src_path, const char *dst_path)
-{
+int fs_rename(const char *src_path, const char *dst_path) {
     /* your code here */
     return -EOPNOTSUPP;
 }
@@ -331,14 +326,12 @@ int fs_rename(const char *src_path, const char *dst_path)
  * success - return 0
  * Errors - path resolution, ENOENT.
  */
-int fs_chmod(const char *path, mode_t mode)
-{
+int fs_chmod(const char *path, mode_t mode) {
     /* your code here */
     return -EOPNOTSUPP;
 }
 
-int fs_utime(const char *path, struct utimbuf *ut)
-{
+int fs_utime(const char *path, struct utimbuf *ut) {
     /* your code here */
     return -EOPNOTSUPP;
 }
@@ -348,13 +341,12 @@ int fs_utime(const char *path, struct utimbuf *ut)
  * Errors - path resolution, ENOENT, EISDIR, EINVAL
  *    return EINVAL if len > 0.
  */
-int fs_truncate(const char *path, off_t len)
-{
+int fs_truncate(const char *path, off_t len) {
     /* you can cheat by only implementing this for the case of len==0,
      * and an error otherwise.
      */
     if (len != 0)
-	return -EINVAL;		/* invalid argument */
+        return -EINVAL;        /* invalid argument */
 
     /* your code here */
     return -EOPNOTSUPP;
@@ -368,11 +360,69 @@ int fs_truncate(const char *path, off_t len)
  *   - on error, return <0
  * Errors - path resolution, ENOENT, EISDIR
  */
-int fs_read(const char *path, char *buf, size_t len, off_t offset,
-	    struct fuse_file_info *fi)
-{
-    /* your code here */
-    return -EOPNOTSUPP;
+int fs_read(const char *c_path, char *buf, size_t len, off_t offset,
+            struct fuse_file_info *fi) {
+    char *path = strdup(c_path);
+    char *pathv[MAX_PATH_LEN];
+    int pathc = parse(path, pathv);
+    int inum = translate(pathc, pathv);
+    free(path);
+
+    if (inum < 0) {
+        return inum;
+    }
+
+    struct fs_inode inode;
+    if (block_read(&inode, inum, 1) < 0) {
+        fprintf(stderr, "Error reading inode %d\n", inum);
+        return -EIO;
+    }
+
+    if (S_ISDIR(inode.mode)) {
+        fprintf(stderr, "Not a file: %s\n", c_path);
+        return -EISDIR;
+    }
+
+    if (offset >= inode.size) {
+        return 0;
+    }
+
+    size_t bytes_to_read = len;
+    if (offset + len > inode.size) {
+        bytes_to_read = inode.size - offset;
+    }
+
+    char *file_buf = malloc(BLOCK_SIZE);
+    if (file_buf == NULL) {
+        fprintf(stderr, "Error allocating memory\n");
+        return -ENOMEM;
+    }
+
+    int block_num = offset / BLOCK_SIZE;
+    int block_offset = offset % BLOCK_SIZE;
+    size_t bytes_read = 0;
+
+    while (bytes_read < bytes_to_read) {
+
+        if (block_read(file_buf, inode.ptrs[block_num], 1) < 0) {
+            fprintf(stderr, "Error reading block %d\n", inode.ptrs[block_num]);
+            free(file_buf);
+            return -EIO;
+        }
+
+        size_t bytes_to_copy = BLOCK_SIZE - block_offset;
+        if (bytes_read + bytes_to_copy > bytes_to_read) {
+            bytes_to_copy = bytes_to_read - bytes_read;
+        } // adjust for partial read
+
+        memcpy(buf + bytes_read, file_buf + block_offset, bytes_to_copy);
+        bytes_read += bytes_to_copy;
+        block_num++;
+        block_offset = 0;
+    }
+
+    free(file_buf);
+    return bytes_read;
 }
 
 /* write - write data to a file
@@ -384,8 +434,7 @@ int fs_read(const char *path, char *buf, size_t len, off_t offset,
  *   but we don't)
  */
 int fs_write(const char *path, const char *buf, size_t len,
-	     off_t offset, struct fuse_file_info *fi)
-{
+             off_t offset, struct fuse_file_info *fi) {
     /* your code here */
     return -EOPNOTSUPP;
 }
@@ -394,8 +443,7 @@ int fs_write(const char *path, const char *buf, size_t len,
  * see 'man 2 statfs' for description of 'struct statvfs'.
  * Errors - none. Needs to work.
  */
-int fs_statfs(const char *path, struct statvfs *st)
-{
+int fs_statfs(const char *path, struct statvfs *st) {
     /* needs to return the following fields (set others to zero):
      *   f_bsize = BLOCK_SIZE
      *   f_blocks = total image - (superblock + block map)
@@ -413,20 +461,20 @@ int fs_statfs(const char *path, struct statvfs *st)
 /* operations vector. Please don't rename it, or else you'll break things
  */
 struct fuse_operations fs_ops = {
-    .init = fs_init,            /* read-mostly operations */
-    .getattr = fs_getattr,
-    .readdir = fs_readdir,
-    .rename = fs_rename,
-    .chmod = fs_chmod,
-    .read = fs_read,
-    .statfs = fs_statfs,
+        .init = fs_init,            /* read-mostly operations */
+        .getattr = fs_getattr,
+        .readdir = fs_readdir,
+        .rename = fs_rename,
+        .chmod = fs_chmod,
+        .read = fs_read,
+        .statfs = fs_statfs,
 
-    .create = fs_create,        /* write operations */
-    .mkdir = fs_mkdir,
-    .unlink = fs_unlink,
-    .rmdir = fs_rmdir,
-    .utime = fs_utime,
-    .truncate = fs_truncate,
-    .write = fs_write,
+        .create = fs_create,        /* write operations */
+        .mkdir = fs_mkdir,
+        .unlink = fs_unlink,
+        .rmdir = fs_rmdir,
+        .utime = fs_utime,
+        .truncate = fs_truncate,
+        .write = fs_write,
 };
 
