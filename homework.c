@@ -332,13 +332,6 @@ int fs_rename(const char *src_path, const char *dst_path) {
     int src_pathc = parse(src, srcv);
     int dst_pathc = parse(dst, dstv);
 
-    if (src_pathc <= 1 || dst_pathc <= 1) {
-        free(src);
-        free(dst);
-        fprintf(stderr, "Invalid path: %s or %s\n", src_path, dst_path);
-        return -EINVAL;
-    } // rename requires both a parent and a leaf
-
     for (int i = 0; i < src_pathc - 1; i++) {
         if (strcmp(srcv[i], dstv[i]) != 0) {
             free(src);
