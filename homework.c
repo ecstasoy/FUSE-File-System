@@ -326,9 +326,31 @@ int fs_rename(const char *src_path, const char *dst_path) {
  * success - return 0
  * Errors - path resolution, ENOENT.
  */
-int fs_chmod(const char *path, mode_t mode) {
-    /* your code here */
-    return -EOPNOTSUPP;
+int fs_chmod(const char *c_path, mode_t mode) {
+    char *path = strdup(c_path);
+    char *pathv[MAX_PATH_LEN];
+    int pathc = parse(path, pathv);
+    int inum = translate(pathc, pathv);
+    free(path);
+
+    if (inum < 0) {
+        return inum;
+    }
+
+    struct fs_inode inode;
+    if (block_read(&inode, inum, 1) < 0) {
+        fprintf(stderr, "Error reading inode %d\n", inum);
+        return -EIO;
+    }
+
+    inode.mode = (inode.mode & S_IFMT | (mode & ~S_IFMT);
+
+    if (block_write(&inode, inum, 1) < 0) {
+        fprintf(stderr, "Error writing inode %d\n", inum);
+        return -EIO;
+    }
+
+    return 0;
 }
 
 int fs_utime(const char *path, struct utimbuf *ut) {
