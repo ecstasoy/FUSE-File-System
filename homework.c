@@ -114,9 +114,9 @@ int inode_to_stat(int inum, struct stat *sb) {
     sb->st_uid = inode->uid;
     sb->st_gid = inode->gid;
     sb->st_size = inode->size;
-    sb->st_atime = inode->atime;
-    sb->st_mtime = inode->mtime;
-    sb->st_ctime = inode->ctime;
+    sb->st_mtime = inode.mtime;
+    sb->st_ctime = inode.mtime;
+    sb->st_atime = inode.mtime;
     sb->st_blocks = (inode->size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
     return 0;
@@ -172,10 +172,20 @@ void* fs_init(struct fuse_conn_info *conn)
  * hint - factor out inode-to-struct stat conversion - you'll use it
  *        again in readdir
  */
-int fs_getattr(const char *path, struct stat *sb)
+int fs_getattr(const char *c_path, struct stat *sb)
 {
+    char *path = strdup(c_path);
+    char *pathv[MAX_PATH_LEN];
+    int pathc = parse(path, pathv);
+    int inum = translate(pathc, pathv);
+    free (path);
 
-    return -EOPNOTSUPP;
+    if (inum < 0) {
+        fprintf(stderr, "Error translating path: %s\n", c_path);
+        return inum;
+    }
+
+    return inode_to_stat(inum, sb);
 }
 
 /* readdir - get directory contents.
