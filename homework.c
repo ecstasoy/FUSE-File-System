@@ -18,6 +18,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
+#include <stdbool.h>
 
 #include "fs5600.h"
 
@@ -85,7 +86,7 @@ int translate(int pathc, char **pathv) {
         block_read(dirent, inode.ptrs[0], 1);
 
         for (int j = 0; j < 128; j++) {
-            if (entries[j].valid && strcmp(pathv[i], dirent[j].name) == 0) {
+            if (dirent[j].valid && strcmp(pathv[i], dirent[j].name) == 0) {
                 inum = dirent[j].inode;
                 found = true;
                 break;
@@ -101,6 +102,7 @@ int translate(int pathc, char **pathv) {
     return inum;
 }
 
+// factored out inode-to-struct stat conversion
 int inode_to_stat(int inum, struct stat *sb) {
     struct fs_inode inode;
     if (block_read(&inode, inum, 1) < 0) {
@@ -109,15 +111,15 @@ int inode_to_stat(int inum, struct stat *sb) {
     }
 
     memset(sb, 0, sizeof(struct stat));
-    sb->st_mode = inode->mode;
+    sb->st_mode = inode.mode;
     sb->st_nlink = 1;
-    sb->st_uid = inode->uid;
-    sb->st_gid = inode->gid;
-    sb->st_size = inode->size;
+    sb->st_uid = inode.uid;
+    sb->st_gid = inode.gid;
+    sb->st_size = inode.size;
     sb->st_mtime = inode.mtime;
-    sb->st_ctime = inode.mtime;
+    sb->st_ctime = inode.ctime;
     sb->st_atime = inode.mtime;
-    sb->st_blocks = (inode->size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    sb->st_blocks = (inode.size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
     return 0;
 }
@@ -200,11 +202,51 @@ int fs_getattr(const char *c_path, struct stat *sb)
  * hint - check the testing instructions if you don't understand how
  *        to call the filler function
  */
-int fs_readdir(const char *path, void *ptr, fuse_fill_dir_t filler,
+int fs_readdir(const char *c_path, void *ptr, fuse_fill_dir_t filler,
 		       off_t offset, struct fuse_file_info *fi)
 {
-    /* your code here */
-    return -EOPNOTSUPP;
+    char *path = strdup(path);
+    char *pathv[MAX_PATH_LEN];
+    int pathc = parse(path, pathv);
+    int inum = translate(pathc, pathv);
+    free(path);
+
+    if (inum < 0) {
+        fprintf(stderr, "Error translating path: %s\n", c_path);
+        return inum;
+    }
+
+    struct fs_inode inode; // inode of the directory
+    if (block_read(&inode, inum, 1) < 0) {
+        fprintf(stderr, "Error reading inode %d\n", inum);
+        return -EIO;
+    } // read the inode of the directory
+
+    if (!S_ISDIR(inode.mode)) {
+        fprintf(stderr, "Not a directory: %s\n", c_path);
+        return -ENOTDIR;
+    } // check if the inode is a directory
+
+    struct fs_dirent dirent[128]; // directory entries
+    if (block_read(dirent, inode.ptrs[0], 1) < 0) {
+        fprintf(stderr, "Error reading directory entries\n");
+        return -EIO;
+    } // read the directory entries
+
+    // loop through the directory entries and call the filler function
+    for (int i = 0; i < 128; i++) {
+        if (!dirent[i].valid) {
+            continue;
+        }
+
+        struct stat sb;
+        if (inode_to_stat(dirent[i].inode, &sb) < 0) {
+            fprintf(stderr, "Error converting inode to stat\n");
+            return -EIO;
+        }
+
+        filler(ptr, dirent[i].name, &sb, 0); // call the filler function
+    }
 }
 
 /* create - create a new file with specified permissions
