@@ -848,15 +848,53 @@ int fs_utime(const char *path, struct utimbuf *ut) {
  * Errors - path resolution, ENOENT, EISDIR, EINVAL
  *    return EINVAL if len > 0.
  */
-int fs_truncate(const char *path, off_t len) {
+int fs_truncate(const char *c_path, off_t len) {
     /* you can cheat by only implementing this for the case of len==0,
      * and an error otherwise.
      */
     if (len != 0)
         return -EINVAL;        /* invalid argument */
 
-    /* your code here */
-    return -EOPNOTSUPP;
+    char *path = strdup(c_path);
+    char *pathv[MAX_PATH_LEN];
+    int pathc = parse(path, pathv);
+    int inum = translate(pathc, pathv);
+    free(path);
+
+    if (inum < 0) {
+        return inum;
+    }
+
+    struct fs_inode inode;
+    if (block_read(&inode, inum, 1) < 0) {
+        fprintf(stderr, "Error reading inode %d\n", inum);
+        return -EIO;
+    }
+
+    if (S_ISDIR(inode.mode)) {
+        fprintf(stderr, "Not a file: %s\n", c_path);
+        return -EISDIR;
+    }
+
+    int block_num = (inode.size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    for (int i = 0; i < block_num; i++) {
+        bit_clear(bitmap, inode.ptrs[i]);
+    }
+
+    if (block_write(bitmap, 1, 1) < 0) {
+        fprintf(stderr, "Error writing bitmap\n");
+        return -EIO;
+    }
+
+    inode.size = 0;
+    memset(inode.ptrs, 0, sizeof(inode.ptrs));
+
+    if (block_write(&inode, inum, 1) < 0) {
+        fprintf(stderr, "Error writing inode %d\n", inum);
+        return -EIO;
+    }
+
+    return 0;
 }
 
 
