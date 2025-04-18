@@ -275,7 +275,102 @@ int fs_readdir(const char *c_path, void *ptr, fuse_fill_dir_t filler,
  * entire block), you are free to return -ENOSPC instead of expanding it.
  */
 int fs_create(const char *c_path, mode_t mode, struct fuse_file_info *fi) {
-    return -EOPNOTSUPP;
+    char *path = strdup(c_path);
+    char *pathv[MAX_PATH_LEN];
+    int pathc = parse(path, pathv);
+
+    if (pathc < 1) {
+        fprintf(stderr, "Invalid path: %s\n", c_path);
+        free(path);
+        return -ENOENT;
+    }
+
+    int parent_inum = translate(pathc - 1, pathv);
+    if (parent_inum < 0) {
+        fprintf(stderr, "Error translating path: %s\n", c_path);
+        free(path);
+        return parent_inum;
+    }
+
+    if (translate(pathc, pathv) >= 0) {
+        fprintf(stderr, "File already exists: %s\n", c_path);
+        free(path);
+        return -EEXIST;
+    }
+
+    int block_num = -1;
+    for (int i = 0; i < MAX_BLOCKS; i++) {
+        if (!bit_test(bitmap, i)) {
+            block_num = i;
+            bit_set(bitmap, block_num);
+            break;
+        }
+    }
+
+    if (block_num < 0) {
+        fprintf(stderr, "No free blocks available\n");
+        free(path);
+        return -ENOSPC;
+    }
+
+    struct fs_inode new_inode;
+    memset(&new_inode, 0, sizeof(struct fs_inode));
+    new_inode.uid = getuid();
+    new_inode.gid = getgid();
+    new_inode.mode = mode;
+    new_inode.size = 0;
+    new_inode.mtime = time(NULL);
+    new_inode.ctime = new_inode.mtime;
+    new_inode.ptrs[0] = block_num;
+
+    if (block_write(&new_inode, block_num, 1) < 0) {
+        fprintf(stderr, "Error writing new inode\n");
+        free(path);
+        return -EIO;
+    }
+
+    block_write(bitmap, block_num, 1); // looks like bitmap has to be written into disk from memory
+
+    struct fs_inode parent_inode;
+    if (block_read(&parent_inode, parent_inum, 1) < 0) {
+        fprintf(stderr, "Error reading parent inode %d\n", parent_inum);
+        free(path);
+        return -EIO;
+    }
+
+    struct fs_dirent dirent[128];
+    if (block_read(dirent, parent_inode.ptrs[0], 1) < 0) {
+        fprintf(stderr, "Error reading directory entries\n");
+        free(path);
+        return -EIO;
+    }
+
+    bool found = false;
+    for (int i = 0; i < 128; i++) {
+        if (!dirent[i].valid) {
+            dirent[i].valid = true;
+            dirent[i].inode = block_num;
+            strncpy(dirent[i].name, pathv[pathc - 1], sizeof(dirent[i].name) - 1);
+            dirent[i].name[sizeof(dirent[i].name) - 1] = '\0'; // use sizeof(dirent[i].name) instead of MAX_NAME_LEN
+            found = true;
+            break;
+        }
+    }
+
+    if (!found) {
+        fprintf(stderr, "Directory is full\n");
+        free(path);
+        return -ENOSPC;
+    }
+
+    if (block_write(dirent, parent_inode.ptrs[0], 1) < 0) {
+        fprintf(stderr, "Error writing directory entries\n");
+        free(path);
+        return -EIO;
+    }
+
+    free(path);
+    return 0;
 }
 
 /* mkdir - create a directory with the given mode.
