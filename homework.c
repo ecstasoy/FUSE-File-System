@@ -82,15 +82,20 @@ int translate(int pathc, char **pathv) {
     int inum = 2; // root inode
     struct fs_inode inode;
 
+    if (pathc == 0) {
+        return inum; // no path components, return root inode
+    }
+
     for (int i = 0; i < pathc; i++) {
         if (block_read(&inode, inum, 1) < 0) {
             fprintf(stderr, "Error reading inode %d\n", inum);
             return -EIO;
-        } // read the inode
+        }
+
         if (!S_ISDIR(inode.mode)) {
             fprintf(stderr, "Not a directory: %s\n", pathv[i]);
             return -ENOTDIR;
-        } //
+        }
 
         struct fs_dirent dirent[128];
         if (block_read(dirent, inode.ptrs[0], 1) < 0) {
@@ -279,23 +284,41 @@ int fs_create(const char *c_path, mode_t mode, struct fuse_file_info *fi) {
     char *pathv[MAX_PATH_LEN];
     int pathc = parse(path, pathv);
 
-    if (strlen(pathv[pathc - 1]) >= MAX_NAME_LEN) {
-        fprintf(stderr, "Name too long: %s\n", pathv[pathc - 1]);
-        free(path);
-        return -EINVAL;
-    }
-
     if (pathc < 1) {
         fprintf(stderr, "Invalid path: %s\n", c_path);
         free(path);
         return -ENOENT;
     }
 
-    int parent_inum = translate(pathc - 1, pathv);
-    if (parent_inum < 0) {
-        fprintf(stderr, "Error translating path: %s\n", c_path);
+    if (strlen(pathv[pathc - 1]) >= MAX_NAME_LEN) {
+        fprintf(stderr, "Name too long: %s\n", pathv[pathc - 1]);
         free(path);
-        return parent_inum;
+        return -EINVAL;
+    }
+
+    int parent_inum;
+    if (pathc > 1) {
+        parent_inum = translate(pathc - 1, pathv);
+        if (parent_inum < 0) {
+            fprintf(stderr, "Error translating path: %s\n", c_path);
+            free(path);
+            return parent_inum;
+        }
+    } else {
+        parent_inum = 2;
+    }
+
+    struct fs_inode parent_inode;
+    if (block_read(&parent_inode, parent_inum, 1) < 0) {
+        fprintf(stderr, "Error reading parent inode %d\n", parent_inum);
+        free(path);
+        return -EIO;
+    }
+
+    if (!S_ISDIR(parent_inode.mode)) {
+        fprintf(stderr, "Not a directory: %s\n", c_path);
+        free(path);
+        return -ENOTDIR;
     }
 
     if (translate(pathc, pathv) >= 0) {
@@ -305,7 +328,7 @@ int fs_create(const char *c_path, mode_t mode, struct fuse_file_info *fi) {
     }
 
     int block_num = -1;
-    for (int i = 0; i < MAX_BLOCKS; i++) {
+    for (int i = 3; i < MAX_BLOCKS; i++) {
         if (!bit_test(bitmap, i)) {
             block_num = i;
             bit_set(bitmap, block_num);
@@ -341,19 +364,6 @@ int fs_create(const char *c_path, mode_t mode, struct fuse_file_info *fi) {
         free(path);
         return -EIO;
     } // looks like bitmap has to be written into disk from memory
-
-    struct fs_inode parent_inode;
-    if (block_read(&parent_inode, parent_inum, 1) < 0) {
-        fprintf(stderr, "Error reading parent inode %d\n", parent_inum);
-        free(path);
-        return -EIO;
-    }
-
-    if (!S_ISDIR(parent_inode.mode)) {
-        fprintf(stderr, "Not a directory: %s\n", c_path);
-        free(path);
-        return -ENOTDIR;
-    }
 
     struct fs_dirent dirent[128];
     if (block_read(dirent, parent_inode.ptrs[0], 1) < 0) {
@@ -410,11 +420,22 @@ int fs_mkdir(const char *c_path, mode_t mode) {
         return -ENOENT;
     }
 
-    int parent_inum = translate(pathc - 1, pathv);
-    if (parent_inum < 0) {
-        fprintf(stderr, "Error translating path: %s\n", c_path);
+    if (strlen(pathv[pathc - 1]) >= MAX_NAME_LEN) {
+        fprintf(stderr, "Name too long: %s\n", pathv[pathc - 1]);
         free(path);
-        return parent_inum;
+        return -EINVAL;
+    }
+
+    int parent_inum;
+    if (pathc > 1) {
+        parent_inum = translate(pathc - 1, pathv);
+        if (parent_inum < 0) {
+            fprintf(stderr, "Error translating path: %s\n", c_path);
+            free(path);
+            return parent_inum;
+        }
+    } else {
+        parent_inum = 2;
     }
 
     if (translate(pathc, pathv) >= 0) {
@@ -424,7 +445,7 @@ int fs_mkdir(const char *c_path, mode_t mode) {
     }
 
     int block_num = -1;
-    for (int i = 0; i < MAX_BLOCKS; i++) {
+    for (int i = 3; i < MAX_BLOCKS; i++) {
         if (!bit_test(bitmap, i)) {
             block_num = i;
             bit_set(bitmap, block_num);
@@ -448,7 +469,7 @@ int fs_mkdir(const char *c_path, mode_t mode) {
     new_dir_inode.size = BLOCK_SIZE;
 
     int dir_block_num = -1;
-    for (int i = 0; i < MAX_BLOCKS; i++) {
+    for (int i = 3; i < MAX_BLOCKS; i++) {
         if (!bit_test(bitmap, i)) {
             dir_block_num = i;
             bit_set(bitmap, dir_block_num);
@@ -460,6 +481,13 @@ int fs_mkdir(const char *c_path, mode_t mode) {
         fprintf(stderr, "No free blocks available for directory\n");
         free(path);
         return -ENOSPC;
+    }
+
+    struct fs_dirent empty_dirent[128] = {0};
+    if (block_write(empty_dirent, dir_block_num, 1) < 0) {
+        fprintf(stderr, "Error initializing new directory block\n");
+        free(path);
+        return -EIO;
     }
 
     new_dir_inode.ptrs[0] = dir_block_num;
@@ -481,6 +509,12 @@ int fs_mkdir(const char *c_path, mode_t mode) {
         fprintf(stderr, "Error reading parent inode %d\n", parent_inum);
         free(path);
         return -EIO;
+    }
+
+    if (!S_ISDIR(parent_inode.mode)) {
+        fprintf(stderr, "Parent is not a directory: %s\n", pathv[pathc - 2]);
+        free(path);
+        return -ENOTDIR;
     }
 
     struct fs_dirent dirent[128];
@@ -534,11 +568,28 @@ int fs_unlink(const char *c_path) {
         return -ENOENT;
     }
 
-    int parent_inum = translate(pathc - 1, pathv);
-    if (parent_inum < 0) {
-        fprintf(stderr, "Error translating path: %s\n", c_path);
+    int parent_inum;
+    if (pathc > 1) {
+        parent_inum = translate(pathc - 1, pathv);
+        if (parent_inum < 0) {
+            fprintf(stderr, "Error translating path: %s\n", c_path);
+            free(path);
+            return parent_inum;
+        }
+    } else {
+        parent_inum = 2;
+    }
+
+    struct fs_inode parent_inode;
+    if (block_read(&parent_inode, parent_inum, 1) < 0) {
         free(path);
-        return parent_inum;
+        return -EIO;
+    }
+
+    if (!S_ISDIR(parent_inode.mode)) {
+        fprintf(stderr, "Not a directory: %s\n", c_path);
+        free(path);
+        return -ENOTDIR;
     }
 
     int file_inum = translate(pathc, pathv);
@@ -559,12 +610,6 @@ int fs_unlink(const char *c_path) {
         fprintf(stderr, "Not a file: %s\n", c_path);
         free(path);
         return -EISDIR;
-    }
-
-    struct fs_inode parent_inode;
-    if (block_read(&parent_inode, parent_inum, 1) < 0) {
-        free(path);
-        return -EIO;
     }
 
     struct fs_dirent dirent[128];
@@ -620,6 +665,10 @@ int fs_rmdir(const char *c_path) {
     char *path = strdup(c_path);
     char *pathv[MAX_PATH_LEN];
     int pathc = parse(path, pathv);
+    for (int i = 0; i < pathc; i++) {
+        printf("  pathv[%d] = '%s'\n", i, pathv[i]);
+    }
+
 
     if (pathc < 1) {
         fprintf(stderr, "Invalid path: %s\n", c_path);
@@ -627,10 +676,16 @@ int fs_rmdir(const char *c_path) {
         return -ENOENT;
     }
 
-    int parent_inum = translate(pathc - 1, pathv);
-    if (parent_inum < 0) {
-        free(path);
-        return parent_inum;
+    int parent_inum;
+    if (pathc > 1) {
+        parent_inum = translate(pathc - 1, pathv);
+        if (parent_inum < 0) {
+            fprintf(stderr, "Error translating path: %s\n", c_path);
+            free(path);
+            return parent_inum;
+        }
+    } else {
+        parent_inum = 2;
     }
 
     int dir_inum = translate(pathc, pathv);
@@ -679,6 +734,8 @@ int fs_rmdir(const char *c_path) {
         free(path);
         return -EIO;
     }
+
+    printf("Root inode mode: %o\n", parent_inode.mode);
 
     struct fs_dirent parent_dirent[128];
     if (block_read(parent_dirent, parent_inode.ptrs[0], 1) < 0) {
