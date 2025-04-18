@@ -838,6 +838,11 @@ int fs_chmod(const char *c_path, mode_t mode) {
     return 0;
 }
 
+/* utime - change access and modification times
+ * success - return 0
+ * Errors - path resolution, ENOENT
+ *          EINVAL if the file is a directory.
+ */
 int fs_utime(const char *c_path, struct utimbuf *ut) {
     char *path = strdup(c_path);
     char *pathv[MAX_PATH_LEN];
@@ -952,7 +957,7 @@ int fs_read(const char *c_path, char *buf, size_t len, off_t offset,
     }
 
     if (offset >= inode.size) {
-        return 0;
+        return -EINVAL;
     }
 
     size_t bytes_to_read = len;
@@ -1001,10 +1006,88 @@ int fs_read(const char *c_path, char *buf, size_t len, off_t offset,
  *  (POSIX semantics support the creation of files with "holes" in them, 
  *   but we don't)
  */
-int fs_write(const char *path, const char *buf, size_t len,
+int fs_write(const char *c_path, const char *buf, size_t len,
              off_t offset, struct fuse_file_info *fi) {
-    /* your code here */
-    return -EOPNOTSUPP;
+    char *path = strdup(c_path);
+    char *pathv[MAX_PATH_LEN];
+    int pathc = parse(path, pathv);
+    int inum = translate(pathc, pathv);
+    free(path);
+
+    if (inum < 0) {
+        return inum;
+    }
+
+    struct fs_inode inode;
+    if (block_read(&inode, inum, 1) < 0) {
+        fprintf(stderr, "Error reading inode %d\n", inum);
+        return -EIO;
+    }
+
+    if (S_ISDIR(inode.mode)) {
+        return -EISDIR;
+    }
+
+    if (offset > inode.size) {
+        return -EINVAL;
+    }
+
+    int end_offset = offset + len;
+    int needed_blocks = (end_offset + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    int current_blocks = (inode.size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+    for (int i = current_blocks; i < needed_blocks; i++) {
+        for (int j = 0; j < MAX_BLOCKS; j++) {
+            if (!bit_test(bitmap, j)) {
+                bit_set(bitmap, j);
+                inode.ptrs[i] = j;
+                block_write(bitmap, 1, 1);
+                break;
+            }
+        }
+    } // allocate new blocks if needed
+
+    int block_num = offset / BLOCK_SIZE;
+    int block_offset = offset % BLOCK_SIZE;
+    size_t bytes_written = 0;
+
+    while (bytes_written < len) {
+        char *file_buf = malloc(BLOCK_SIZE);
+
+        if (block_read(file_buf, inode.ptrs[block_num], 1) < 0) {
+            fprintf(stderr, "Error reading block %d\n", inode.ptrs[block_num]);
+            free(file_buf);
+            return -EIO;
+        }
+
+        size_t bytes_to_copy = BLOCK_SIZE - block_offset;
+        if (bytes_written + bytes_to_copy > len) {
+            bytes_to_copy = len - bytes_written;
+        } // adjust for partial write
+
+        memcpy(file_buf + block_offset, buf + bytes_written, bytes_to_copy);
+
+        if (block_write(file_buf, inode.ptrs[block_num], 1) < 0) {
+            fprintf(stderr, "Error writing block %d\n", inode.ptrs[block_num]);
+            free(file_buf);
+            return -EIO;
+        }
+
+        bytes_written += bytes_to_copy;
+        block_num++;
+        block_offset = 0;
+    } // similar to fs_read, but writing instead of reading
+
+    if (offset + len > inode.size) {
+        inode.size = offset + len;
+    }
+
+    if (block_write(&inode, inum, 1) < 0) {
+        fprintf(stderr, "Error writing inode %d\n", inum);
+        return -EIO;
+    }
+
+    return bytes_written;
 }
 
 /* statfs - get file system statistics
