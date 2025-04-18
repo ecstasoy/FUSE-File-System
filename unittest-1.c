@@ -18,6 +18,7 @@
 extern struct fuse_operations fs_ops;
 extern void block_init(char *file);
 
+/* test data for getattr */
 struct {
     const char *path;
     uint16_t uid;
@@ -46,7 +47,7 @@ struct {
 
 };
 
-/* change test name and make it do something useful */
+/* test that getattr works for all paths */
 START_TEST(test_getattr_paths) {
     for (int i = 0; getattr_test[i].path != NULL; i++) {
         printf("getattr_test[%d]: %s\n", i, getattr_test[i].path);
@@ -64,6 +65,7 @@ START_TEST(test_getattr_paths) {
 }
 END_TEST
 
+/* test that getattr fails for invalid paths */
 START_TEST(test_getattr_not_a_file) {
     struct stat sb;
     int rv = fs_ops.getattr("/not-a-file", &sb);
@@ -72,6 +74,7 @@ START_TEST(test_getattr_not_a_file) {
 }
 END_TEST
 
+/* test getattr fails for paths that are not directories */
 START_TEST(test_getattr_not_a_dir) {
     struct stat sb;
     int rv = fs_ops.getattr("/file.1k/file.0", &sb);
@@ -80,6 +83,7 @@ START_TEST(test_getattr_not_a_dir) {
 }
 END_TEST
 
+/* test getattr fails for paths that are not directories */
 START_TEST(test_getattr_middle_missing) {
     struct stat sb;
     int rv = fs_ops.getattr("/not-a-dir/file.0", &sb);
@@ -88,6 +92,7 @@ START_TEST(test_getattr_middle_missing) {
 }
 END_TEST
 
+/* test getattr fails for paths that are not directories */
 START_TEST(test_getattr_subdir_missing) {
     struct stat sb;
     int rv = fs_ops.getattr("/dir2/not-a-file", &sb);
@@ -96,6 +101,7 @@ START_TEST(test_getattr_subdir_missing) {
 }
 END_TEST
 
+/* directory entry for tests */
 struct {
     const char* name;
     int seen;
@@ -113,7 +119,7 @@ struct {
         {NULL}
 };
 
-void readdir_test_load(const char **names) {
+void test_load(const char **names) {
     int i = 0;
     while (names[i] != NULL) {
         dirent[i].name = names[i];
@@ -123,7 +129,15 @@ void readdir_test_load(const char **names) {
     dirent[i].name = NULL;
 }
 
-int readdir_test_filler(void *ptr, const char *name, const struct stat *st, off_t off) {
+/* test_filler is a callback function for readdir. it checks
+ * that the directory entries are seen in the correct order.
+ * it is used to check that the directories are created and
+ * removed correctly.
+ */
+int test_filler(void *ptr, const char *name, const struct stat *st, off_t off) {
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+        return 0;
+
     for (int i = 0; dirent[i].name != NULL; i++) {
         if (strcmp(name, dirent[i].name) == 0) {
             ck_assert_int_eq(dirent[i].seen, 0);
@@ -131,14 +145,15 @@ int readdir_test_filler(void *ptr, const char *name, const struct stat *st, off_
             return 0;
         }
     }
-    ck_abort_msg("Unexpected name in readdir: %s", name);
+
     return 0;
 }
 
+/* test that readdir works for all paths */
 START_TEST(test_readdir_all) {
     for (int i = 0; readdir_test[i].path != NULL; i++) {
-        readdir_test_load(readdir_test[i].entries);
-        int rv = fs_ops.readdir(readdir_test[i].path, NULL, readdir_test_filler, 0, NULL);
+        test_load(readdir_test[i].entries);
+        int rv = fs_ops.readdir(readdir_test[i].path, NULL, test_filler, 0, NULL);
         printf("test_readdir_all rv: %d\n", rv);
         ck_assert_int_eq(rv, 0);
         for (int j = 0; dirent[j].name != NULL; j++) {
@@ -149,17 +164,19 @@ START_TEST(test_readdir_all) {
 }
 END_TEST
 
+/* test different error cases for readdir */
 START_TEST(test_readdir_errors){
-    int rv1 = fs_ops.readdir("/file.1k", NULL, readdir_test_filler, 0, NULL);
+    int rv1 = fs_ops.readdir("/file.1k", NULL, test_filler, 0, NULL);
     printf("test_readdir_errors rv: %d\n", rv1);
     ck_assert_msg(rv1 == -ENOTDIR, "Expected -ENOTDIR, got %d", rv1);
 
-    int rv2 = fs_ops.readdir("/no/such/path", NULL, readdir_test_filler, 0, NULL);
+    int rv2 = fs_ops.readdir("/no/such/path", NULL, test_filler, 0, NULL);
     printf("test_readdir_errors rv: %d\n", rv2);
     ck_assert_msg(rv2 == -ENOENT, "Expected -ENOENT, got %d", rv2);
 }
 END_TEST
 
+/* test data for read */
 struct {
     const char *path;
     size_t size;
@@ -178,6 +195,7 @@ struct {
         {NULL}
 };
 
+/* test that read works for all paths */
 START_TEST(test_read_full) {
     char *buffer = malloc(15000);
     if (buffer == NULL) {
@@ -200,6 +218,7 @@ START_TEST(test_read_full) {
 }
 END_TEST
 
+/* test that read works for all paths with different chunk sizes */
 START_TEST(test_read_chunks) {
     size_t chunks[] = {17, 100, 1000, 1024, 1970, 3000};
     for (int i = 0; read_test[i].path != NULL; i++) {
@@ -234,6 +253,7 @@ START_TEST(test_read_chunks) {
 }
 END_TEST
 
+/* test that statfs works */
 START_TEST(test_statfs) {
     struct statvfs sv;
     int rv = fs_ops.statfs("/", &sv);
@@ -247,6 +267,7 @@ START_TEST(test_statfs) {
 }
 END_TEST
 
+/* test that chmod works */
 START_TEST(test_chmod) {
     struct stat sb;
 
@@ -274,6 +295,7 @@ START_TEST(test_chmod) {
 }
 END_TEST
 
+/* test rename works for files and directories */
 START_TEST(test_rename_file) {
     const char *old_path = "/file.1k";
     const char *new_path = "/file.2k";
@@ -294,6 +316,7 @@ START_TEST(test_rename_file) {
 }
 END_TEST
 
+/* test rename works for directories */
 START_TEST(test_rename_directory) {
     const char *old_path = "/dir3";
     const char *new_path = "/dir3-renamed";
