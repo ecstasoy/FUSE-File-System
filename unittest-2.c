@@ -597,6 +597,10 @@ START_TEST(test_write_error) {
 }
 END_TEST
 
+/* test fs_truncate by creating files of different sizes
+ * and truncating them to zero. check that the
+ * space has been freed and that the file size is zero
+ */
 START_TEST(test_truncate) {
     system("python gen-disk.py -q disk2.in test2.img");
     block_init("test2.img");
