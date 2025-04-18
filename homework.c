@@ -279,6 +279,12 @@ int fs_create(const char *c_path, mode_t mode, struct fuse_file_info *fi) {
     char *pathv[MAX_PATH_LEN];
     int pathc = parse(path, pathv);
 
+    if (strlen(pathv[pathc - 1]) >= MAX_NAME_LEN) {
+        fprintf(stderr, "Name too long: %s\n", pathv[pathc - 1]);
+        free(path);
+        return -EINVAL;
+    }
+
     if (pathc < 1) {
         fprintf(stderr, "Invalid path: %s\n", c_path);
         free(path);
@@ -315,6 +321,7 @@ int fs_create(const char *c_path, mode_t mode, struct fuse_file_info *fi) {
 
     struct fs_inode new_inode;
     memset(&new_inode, 0, sizeof(struct fs_inode));
+    memset(new_inode.ptrs, 0, sizeof(new_inode.ptrs));
     new_inode.uid = getuid();
     new_inode.gid = getgid();
     new_inode.mode = mode;
@@ -340,6 +347,12 @@ int fs_create(const char *c_path, mode_t mode, struct fuse_file_info *fi) {
         fprintf(stderr, "Error reading parent inode %d\n", parent_inum);
         free(path);
         return -EIO;
+    }
+
+    if (!S_ISDIR(parent_inode.mode)) {
+        fprintf(stderr, "Not a directory: %s\n", c_path);
+        free(path);
+        return -ENOTDIR;
     }
 
     struct fs_dirent dirent[128];
@@ -529,10 +542,10 @@ int fs_unlink(const char *c_path) {
     }
 
     int file_inum = translate(pathc, pathv);
-    if (file_inum >= 0) {
-        fprintf(stderr, "File already exists: %s\n", c_path);
+    if (file_inum < 0) {
+        fprintf(stderr, "Error translating path: %s\n", c_path);
         free(path);
-        return -EEXIST;
+        return -ENOENT;
     }
 
     struct fs_inode file_inode;
@@ -583,7 +596,8 @@ int fs_unlink(const char *c_path) {
 
     int block_num = (file_inode.size + BLOCK_SIZE - 1) / BLOCK_SIZE; // calculate the number of blocks used by the file
     for (int i = 0; i < block_num; i++) {
-        bit_clear(bitmap, file_inode.ptrs[i]); // clear the bitmap for each block used by the file
+        if (file_inode.ptrs[i] > 0 && file_inode.ptrs[i] < MAX_BLOCKS)
+            bit_clear(bitmap, file_inode.ptrs[i]); // clear the bitmap for each block used by the file
     }
 
     bit_clear(bitmap, file_inum); // clear the bitmap for the inode itself
