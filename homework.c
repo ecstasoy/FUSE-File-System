@@ -838,9 +838,32 @@ int fs_chmod(const char *c_path, mode_t mode) {
     return 0;
 }
 
-int fs_utime(const char *path, struct utimbuf *ut) {
-    /* your code here */
-    return -EOPNOTSUPP;
+int fs_utime(const char *c_path, struct utimbuf *ut) {
+    char *path = strdup(c_path);
+    char *pathv[MAX_PATH_LEN];
+    int pathc = parse(path, pathv);
+    int inum = translate(pathc, pathv);
+    free(path);
+
+    if (inum < 0) {
+        return inum;
+    }
+
+    struct fs_inode inode;
+    if (block_read(&inode, inum, 1) < 0) {
+        fprintf(stderr, "Error reading inode %d\n", inum);
+        return -EIO;
+    }
+
+    inode.mtime = ut->modtime;
+    inode.ctime = ut->actime;
+
+    if (block_write(&inode, inum, 1) < 0) {
+        fprintf(stderr, "Error writing inode %d\n", inum);
+        return -EIO;
+    }
+
+    return 0;
 }
 
 /* truncate - truncate file to exactly 'len' bytes
