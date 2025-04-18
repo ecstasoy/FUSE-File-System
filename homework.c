@@ -993,6 +993,13 @@ int fs_truncate(const char *c_path, off_t len) {
         return -EIO;
     }
 
+    bit_clear(bitmap, inum);
+
+    if (block_write(bitmap, 1, 1) < 0) {
+        fprintf(stderr, "Error writing bitmap\n");
+        return -EIO;
+    }
+
     return 0;
 }
 
