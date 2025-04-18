@@ -597,6 +597,52 @@ START_TEST(test_write_error) {
 }
 END_TEST
 
+START_TEST(test_truncate) {
+    system("python gen-disk.py -q disk2.in test2.img");
+    block_init("test2.img");
+    fs_ops.init(NULL);
+    const char *paths[] = {"/file1k", "/file4k", "/file6k", "/file8k", "/file12k", "/file12k_exact", NULL};
+    int sizes[] = {1000, 4096, 6000, 8192, 12000, 12288};
+
+    for (int i = 0; paths[i] != NULL; i++) {
+        struct statvfs sv_before;
+        printf("(test_truncate) statfs before: %s\n", paths[i]);
+        ck_assert_int_eq(fs_ops.statfs("/", &sv_before), 0);
+        printf("(test_truncate) before free blocks: %d\n", sv_before.f_bfree);
+        int before_free = sv_before.f_bfree;
+
+        ck_assert_int_eq(fs_ops.create(paths[i], S_IFREG | 0777, NULL), 0);
+        printf("(test_truncate) write %s size: %d\n", paths[i], sizes[i]);
+        char *buf = test_generate(0, sizes[i]);
+        ck_assert_int_eq(fs_ops.write(paths[i], buf, sizes[i], 0, NULL), sizes[i]);
+
+        ck_assert_int_eq(fs_ops.truncate(paths[i], 0), 0); // truncate to zero
+
+        struct stat sb;
+        printf("(test_truncate) getattr %s\n", paths[i]);
+        ck_assert_int_eq(fs_ops.getattr(paths[i], &sb), 0);
+        ck_assert_int_eq(sb.st_size, 0);
+
+        char *read_buf = malloc(sizes[i]);
+        int rv = fs_ops.read(paths[i], read_buf, sizes[i], 0, NULL);
+        printf("(test_truncate) read %s rv: %d\n", paths[i], rv);
+        ck_assert_int_eq(rv, -EINVAL); // read should fail after truncation
+
+        struct statvfs sv_after;
+        printf("(test_truncate) statfs after: %s\n", paths[i]);
+        ck_assert_int_eq(fs_ops.statfs("/", &sv_after), 0);
+        printf("(test_truncate) after free blocks: %d\n", sv_after.f_bfree);
+        int after_free = sv_after.f_bfree;
+
+        // check that the free space has increased
+        ck_assert_msg(after_free >= before_free, "Expected more free blocks after truncation");
+
+        free(buf);
+        free(read_buf);
+    }
+}
+END_TEST
+
 /* this is an example of a callback function for readdir
  */
 int empty_filler(void *ptr, const char *name, const struct stat *stbuf,
@@ -637,6 +683,7 @@ int main(int argc, char **argv)
     tcase_add_test(tc, test_write_overwrite);
     tcase_add_test(tc, test_write_unlink_block);
     tcase_add_test(tc, test_write_error);
+    tcase_add_test(tc, test_truncate);
 
     suite_add_tcase(s, tc);
     SRunner *sr = srunner_create(s);
