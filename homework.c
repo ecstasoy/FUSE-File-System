@@ -329,7 +329,11 @@ int fs_create(const char *c_path, mode_t mode, struct fuse_file_info *fi) {
         return -EIO;
     }
 
-    block_write(bitmap, block_num, 1); // looks like bitmap has to be written into disk from memory
+    if (block_write(bitmap, block_num, 1) < 0) {
+        fprintf(stderr, "Error writing bitmap\n");
+        free(path);
+        return -EIO;
+    } // looks like bitmap has to be written into disk from memory
 
     struct fs_inode parent_inode;
     if (block_read(&parent_inode, parent_inum, 1) < 0) {
@@ -382,9 +386,123 @@ int fs_create(const char *c_path, mode_t mode, struct fuse_file_info *fi) {
  * Errors - path resolution, EEXIST
  * Conditions for EEXIST are the same as for create. 
  */
-int fs_mkdir(const char *path, mode_t mode) {
-    /* your code here */
-    return -EOPNOTSUPP;
+int fs_mkdir(const char *c_path, mode_t mode) {
+    char *path = strdup(c_path);
+    char *pathv[MAX_PATH_LEN];
+    int pathc = parse(path, pathv);
+
+    if (pathc < 1) {
+        fprintf(stderr, "Invalid path: %s\n", c_path);
+        free(path);
+        return -ENOENT;
+    }
+
+    int parent_inum = translate(pathc - 1, pathv);
+    if (parent_inum < 0) {
+        fprintf(stderr, "Error translating path: %s\n", c_path);
+        free(path);
+        return parent_inum;
+    }
+
+    if (translate(pathc, pathv) >= 0) {
+        fprintf(stderr, "File already exists: %s\n", c_path);
+        free(path);
+        return -EEXIST;
+    }
+
+    int block_num = -1;
+    for (int i = 0; i < MAX_BLOCKS; i++) {
+        if (!bit_test(bitmap, i)) {
+            block_num = i;
+            bit_set(bitmap, block_num);
+            break;
+        }
+    }
+
+    if (block_num < 0) {
+        fprintf(stderr, "No free blocks available\n");
+        free(path);
+        return -ENOSPC;
+    }
+
+    struct fs_inode new_dir_inode;
+    memset(&new_dir_inode, 0, sizeof(struct fs_inode));
+    new_dir_inode.uid = getuid();
+    new_dir_inode.gid = getgid();
+    new_dir_inode.mode = mode | S_IFDIR;
+    new_dir_inode.ctime = time(NULL);
+    new_dir_inode.mtime = new_dir_inode.ctime;
+    new_dir_inode.size = BLOCK_SIZE;
+
+    int dir_block_num = -1;
+    for (int i = 0; i < MAX_BLOCKS; i++) {
+        if (!bit_test(bitmap, i)) {
+            dir_block_num = i;
+            bit_set(bitmap, dir_block_num);
+            break;
+        }
+    }
+
+    if (dir_block_num < 0) {
+        fprintf(stderr, "No free blocks available for directory\n");
+        free(path);
+        return -ENOSPC;
+    }
+
+    new_dir_inode.ptrs[0] = dir_block_num;
+
+    if (block_write(&new_dir_inode, block_num, 1) < 0) {
+        fprintf(stderr, "Error writing new directory inode\n");
+        free(path);
+        return -EIO;
+    }
+
+    if (block_write(bitmap, 1, 1) < 0) {
+        fprintf(stderr, "Error writing bitmap\n");
+        free(path);
+        return -EIO;
+    }
+
+    struct fs_inode parent_inode;
+    if (block_read(&parent_inode, parent_inum, 1) < 0) {
+        fprintf(stderr, "Error reading parent inode %d\n", parent_inum);
+        free(path);
+        return -EIO;
+    }
+
+    struct fs_dirent dirent[128];
+    if (block_read(dirent, parent_inode.ptrs[0], 1) < 0) {
+        fprintf(stderr, "Error reading directory entries\n");
+        free(path);
+        return -EIO;
+    }
+
+    bool found = false;
+    for (int i = 0; i < 128; i++) {
+        if (!dirent[i].valid) {
+            dirent[i].valid = true;
+            dirent[i].inode = block_num;
+            strncpy(dirent[i].name, pathv[pathc - 1], sizeof(dirent[i].name) - 1);
+            dirent[i].name[sizeof(dirent[i].name) - 1] = '\0';
+            found = true;
+            break;
+        }
+    }
+
+    if (!found) {
+        fprintf(stderr, "Directory is full\n");
+        free(path);
+        return -ENOSPC;
+    }
+
+    if (block_write(dirent, parent_inode.ptrs[0], 1) < 0) {
+        fprintf(stderr, "Error writing directory entries\n");
+        free(path);
+        return -EIO;
+    }
+
+    free(path);
+    return 0;
 }
 
 
@@ -392,18 +510,202 @@ int fs_mkdir(const char *path, mode_t mode) {
  *  success - return 0
  *  errors - path resolution, ENOENT, EISDIR
  */
-int fs_unlink(const char *path) {
-    /* your code here */
-    return -EOPNOTSUPP;
+int fs_unlink(const char *c_path) {
+    char *path = strdup(c_path);
+    char *pathv[MAX_PATH_LEN];
+    int pathc = parse(path, pathv);
+
+    if (pathc < 1) {
+        fprintf(stderr, "Invalid path: %s\n", c_path);
+        free(path);
+        return -ENOENT;
+    }
+
+    int parent_inum = translate(pathc - 1, pathv);
+    if (parent_inum < 0) {
+        fprintf(stderr, "Error translating path: %s\n", c_path);
+        free(path);
+        return parent_inum;
+    }
+
+    int file_inum = translate(pathc, pathv);
+    if (file_inum >= 0) {
+        fprintf(stderr, "File already exists: %s\n", c_path);
+        free(path);
+        return -EEXIST;
+    }
+
+    struct fs_inode file_inode;
+    if (block_read(&file_inode, file_inum, 1) < 0) {
+        fprintf(stderr, "Error reading file inode %d\n", file_inum);
+        free(path);
+        return -EIO;
+    }
+
+    if (S_ISDIR(file_inode.mode)) {
+        fprintf(stderr, "Not a file: %s\n", c_path);
+        free(path);
+        return -EISDIR;
+    }
+
+    struct fs_inode parent_inode;
+    if (block_read(&parent_inode, parent_inum, 1) < 0) {
+        free(path);
+        return -EIO;
+    }
+
+    struct fs_dirent dirent[128];
+    if (block_read(dirent, parent_inode.ptrs[0], 1) < 0) {
+        fprintf(stderr, "Error reading directory entries\n");
+        free(path);
+        return -EIO;
+    }
+
+    bool removed = false;
+    for (int i = 0; i < 128; i++) {
+        if (dirent[i].valid && dirent[i].inode == file_inum) {
+            dirent[i].valid = 0;
+            removed = true;
+            break;
+        }
+    }
+
+    if (!removed) {
+        fprintf(stderr, "File not found: %s\n", c_path);
+        free(path);
+        return -ENOENT;
+    }
+
+    if (block_write(dirent, parent_inode.ptrs[0], 1) < 0) {
+        free(path);
+        return -EIO;
+    }
+
+    int block_num = (file_inode.size + BLOCK_SIZE - 1) / BLOCK_SIZE; // calculate the number of blocks used by the file
+    for (int i = 0; i < block_num; i++) {
+        bit_clear(bitmap, file_inode.ptrs[i]); // clear the bitmap for each block used by the file
+    }
+
+    bit_clear(bitmap, file_inum); // clear the bitmap for the inode itself
+
+    if (block_write(bitmap, 1, 1) < 0) {
+        fprintf(stderr, "Error writing bitmap\n");
+        free(path);
+        return -EIO;
+    }
+
+    free(path);
+    return 0;
 }
 
 /* rmdir - remove a directory
  *  success - return 0
  *  Errors - path resolution, ENOENT, ENOTDIR, ENOTEMPTY
  */
-int fs_rmdir(const char *path) {
-    /* your code here */
-    return -EOPNOTSUPP;
+int fs_rmdir(const char *c_path) {
+    char *path = strdup(c_path);
+    char *pathv[MAX_PATH_LEN];
+    int pathc = parse(path, pathv);
+
+    if (pathc < 1) {
+        fprintf(stderr, "Invalid path: %s\n", c_path);
+        free(path);
+        return -ENOENT;
+    }
+
+    int parent_inum = translate(pathc - 1, pathv);
+    if (parent_inum < 0) {
+        free(path);
+        return parent_inum;
+    }
+
+    int dir_inum = translate(pathc, pathv);
+    if (dir_inum < 0) {
+        fprintf(stderr, "Error translating path: %s\n", c_path);
+        free(path);
+        return dir_inum;
+    }
+
+    struct fs_inode dir_inode;
+    if (block_read(&dir_inode, dir_inum, 1) < 0) {
+        fprintf(stderr, "Error reading directory inode %d\n", dir_inum);
+        free(path);
+        return -EIO;
+    }
+
+    if (!S_ISDIR(dir_inode.mode)) {
+        fprintf(stderr, "Not a directory: %s\n", c_path);
+        free(path);
+        return -ENOTDIR;
+    }
+
+    struct fs_dirent dirent[128];
+    if (block_read(dirent, dir_inode.ptrs[0], 1) < 0) {
+        fprintf(stderr, "Error reading directory entries\n");
+        free(path);
+        return -EIO;
+    }
+
+    bool empty = true;
+    for (int i = 0; i < 128; i++) {
+        if (dirent[i].valid) {
+            empty = false;
+            break;
+        }
+    }
+
+    if (!empty) {
+        fprintf(stderr, "Directory not empty: %s\n", c_path);
+        free(path);
+        return -ENOTEMPTY;
+    }
+
+    struct fs_inode parent_inode;
+    if (block_read(&parent_inode, parent_inum, 1) < 0) {
+        free(path);
+        return -EIO;
+    }
+
+    struct fs_dirent parent_dirent[128];
+    if (block_read(parent_dirent, parent_inode.ptrs[0], 1) < 0) {
+        free(path);
+        return -EIO;
+    }
+
+    bool removed = false;
+    for (int i = 0; i < 128; i++) {
+        if (parent_dirent[i].valid &&
+            strcmp(parent_dirent[i].name, pathv[pathc - 1]) == 0) {
+            parent_dirent[i].valid = 0;
+            removed = true;
+            break;
+        }
+    }
+
+    if (!removed) {
+        fprintf(stderr, "Directory not found: %s\n", c_path);
+        free(path);
+        return -ENOENT;
+    }
+
+    if (block_write(parent_dirent, parent_inode.ptrs[0], 1) < 0) {
+        fprintf(stderr, "Error writing parent directory entries\n");
+        free(path);
+        return -EIO;
+    }
+
+    bit_clear(bitmap, dir_inode.ptrs[0]); // clear the bitmap for the directory block
+
+    bit_clear(bitmap, dir_inum); // clear the bitmap for the inode itself
+
+    if (block_write(bitmap, 1, 1) < 0) {
+        fprintf(stderr, "Error writing bitmap\n");
+        free(path);
+        return -EIO;
+    }
+
+    free(path);
+    return 0;
 }
 
 /* rename - rename a file or directory
