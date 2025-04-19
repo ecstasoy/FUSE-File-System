@@ -556,11 +556,7 @@ END_TEST
 void test_write_and_unlink_block(const char *path, int size) {
     struct statvfs sv_before, sv_after;
     ck_assert_int_eq(fs_ops.statfs("/", &sv_before), 0);
-<<<<<<< HEAD
     printf("(test_write_and_unlink_block) statfs before: %lu\n", sv_before.f_bfree);
-=======
-    printf("statfs before: %lu\n", sv_before.f_bfree);
->>>>>>> 585e36dbb257b96331f506675214f21a5306cdc3
 
     char *buf = test_generate(0, size);
     ck_assert_int_eq(fs_ops.create(path, S_IFREG | 0777, NULL), 0);
