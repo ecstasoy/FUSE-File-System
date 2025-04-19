@@ -259,8 +259,13 @@ int fs_readdir(const char *c_path, void *ptr, fuse_fill_dir_t filler,
             return -EIO;
         }
 
-        filler(ptr, dirent[i].name, &sb, 0); // call the filler function
+
+        if (filler(ptr, dirent[i].name, &sb, 0) != 0) {
+            break; // STOP if buffer is full
+        }
     }
+
+    return 0;
 }
 
 /* create - create a new file with specified permissions
@@ -357,7 +362,7 @@ int fs_create(const char *c_path, mode_t mode, struct fuse_file_info *fi) {
         return -EIO;
     }
 
-    if (block_write(bitmap, block_num, 1) < 0) {
+    if (block_write(bitmap, 1, 1) < 0) {
         fprintf(stderr, "Error writing bitmap\n");
         free(path);
         return -EIO;
@@ -990,8 +995,6 @@ int fs_truncate(const char *c_path, off_t len) {
         fprintf(stderr, "Error writing inode %d\n", inum);
         return -EIO;
     }
-
-    bit_clear(bitmap, inum);
 
     if (block_write(bitmap, 1, 1) < 0) {
         fprintf(stderr, "Error writing bitmap\n");
