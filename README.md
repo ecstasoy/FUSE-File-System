@@ -1,6 +1,6 @@
 # FUSE Filesystem Implementation
 
-This is a FUSE (Filesystem in Userspace) implementation project that allows users to create and manage custom filesystems in user space.
+This is a FUSE implementation project that allows users to create and manage custom filesystems in user space.
 
 ## Project Structure
 
@@ -24,7 +24,7 @@ This is a FUSE (Filesystem in Userspace) implementation project that allows user
 - Python
 - FUSE for macOS (installable via Homebrew)
 - GCC compiler
-- Check unit testing framework
+- Check unit testing framework (installable via Homebrew)
 
 ## Installing Dependencies
 
@@ -85,5 +85,4 @@ make clean
 ## Notes
 
 - Ensure you have appropriate permissions to mount the filesystem
-- Backup important data before use
 - This filesystem is intended for educational and testing purposes only 
