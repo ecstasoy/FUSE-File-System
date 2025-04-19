@@ -24,4 +24,4 @@ test2.img:
 	python gen-disk.py -q disk2.in test2.img
 
 clean: 
-	rm -f *.o unittest-1 unittest-2 hw3fuse test.img test2.img diskfmt.pyc
+	rm -f *.o unittest-1 unittest-2 fuse test.img test2.img diskfmt.pyc
