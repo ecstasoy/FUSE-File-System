@@ -1,9 +1,8 @@
 /*
  * file:        misc.c
- * description: various support functions for CS 5600 file system
+ * description: various support functions for file system
  *              startup argument parsing and checking, etc.
  *
- * CS 5600, Computer Systems, Northeastern
  */
 
 #define _XOPEN_SOURCE 500
@@ -18,7 +17,7 @@
 #include <fcntl.h>
 #include <assert.h>
 
-#include "fs5600.h"		/* only for FS_BLOCK_SIZE */
+#include "fs.h"        /* only for FS_BLOCK_SIZE */
 
 /*********** DO NOT MODIFY THIS FILE *************/
 
