@@ -17,7 +17,7 @@
 #include <fcntl.h>
 #include <assert.h>
 
-#include "fs.h"        /* only for FS_BLOCK_SIZE */
+#include "../include/fs.h"        /* only for FS_BLOCK_SIZE */
 
 /*********** DO NOT MODIFY THIS FILE *************/
 

@@ -10,7 +10,7 @@
 #include <stddef.h>
 #include <fuse.h>
 
-#include "fs.h"
+#include "../include/fs.h"
 
 extern void block_init(char *file);
 
