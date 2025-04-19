@@ -1,8 +1,6 @@
 /*
- * file:        fs5600.h
- * description: Data structures for CS 5600 file system.
- *
- * CS 5600, Computer Systems, Northeastern 
+ * file:        fs.h
+ * description: Data structures for  file system.
  *
  */
 
