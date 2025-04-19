@@ -564,11 +564,7 @@ void test_write_and_unlink_block(const char *path, int size) {
 
     ck_assert_int_eq(fs_ops.unlink(path), 0);
     ck_assert_int_eq(fs_ops.statfs("/", &sv_after), 0);
-<<<<<<< HEAD
     printf("(test_write_and_unlink_block) statfs after: %lu\n", sv_after.f_bfree);
-=======
-    printf("statfs after: %lu\n", sv_after.f_bfree);
->>>>>>> 585e36dbb257b96331f506675214f21a5306cdc3
 
     ck_assert_int_eq(sv_before.f_bfree, sv_after.f_bfree);
     free(buf);
