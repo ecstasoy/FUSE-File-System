@@ -1,8 +1,6 @@
 /*
- * file: homework.c
- * description: skeleton file for CS 5600 system
+ * file: filesystem.c
  *
- * CS 5600, Computer Systems, Northeastern
  */
 
 #define FUSE_USE_VERSION 27
@@ -20,7 +18,7 @@
 #include <errno.h>
 #include <stdbool.h>
 
-#include "fs5600.h"
+#include "fs.h"
 
 /* if you don't understand why you can't use these system calls here, 
  * you need to read the assignment description another time
